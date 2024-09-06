@@ -1,3 +1,6 @@
+The FluidJ Robot Simulator serves as a comprehensive tool for analyzing both
+forward and inverse kinematics in microrobots equipped with fluid joints.
+
 Folder structure:
 
 - /temp: saves the temporary files to create the mesh video
