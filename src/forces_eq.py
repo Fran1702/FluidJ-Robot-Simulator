@@ -11,6 +11,12 @@ import subprocess
 import os
 import pandas as pd
 
+import os
+import sys
+
+# Add the directory containing this file to the Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 OFF_SET_XY  = 500 # I add this offset to help the algorithm
 U_OFFSET = 1
 Z_OFFSET = 0
@@ -225,6 +231,8 @@ def check_calculated(y,z,ang_x, ang_y,rb):
         return -1,-1,-1,-1, -1
 
 def calc_forces(x, y, z, ang_x, ang_y, ang_z, rb, outputfiles=False, j=None):
+    # x,y,z in um
+    # angles in rads
     #y = np.round(y,3)
     #z = np.round(z,3)
     

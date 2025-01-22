@@ -5,6 +5,12 @@ Created on Mon Mar 25 12:58:53 2024
 
 @author: fran
 """
+
+import sys
+
+# Add the directory containing this file to the Python path
+
+
 from forces_eq import *
 import numpy as np
 import time
@@ -18,14 +24,20 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from concave_hull import concave_hull, concave_hull_indexes
-np.set_printoptions(suppress=True, formatter={'float': '{:0.2e}'.format})
+np.set_printoptions(suppress=True, formatter={'float': '{:0.5e}'.format})
 from matplotlib.animation import FuncAnimation
 from matplotlib.animation import FFMpegWriter
 from multiprocessing.pool import ThreadPool
 from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import ConvexHull, convex_hull_plot_2d
-
-
+from scipy.interpolate import NearestNDInterpolator
+from math import log10, floor
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+#%%
+import pyvista as pv
+from pyvistaqt import BackgroundPlotter
+from pv_plotter_extra import *
+#%%
 import scienceplots
 plt.style.use(['science','ieee'])
 cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -34,20 +46,32 @@ cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
 mpl.rcParams['legend.frameon'] = 'True'
 mpl.rcParams['legend.facecolor'] = 'w'
 
+# For 3d plot
+import WS_3D
+import mpl_toolkits.mplot3d as a3
+
 def get_mean_change(data, axis):
     # return mean and max deviation
     l1 = np.max(data[:,axis])
     l2 = np.min(data[:,axis])
     return (l1+l2)/2, l1-l2
 
-
+def matprint(mat, fmt="g"):
+    col_maxes = [max([len(("{:"+fmt+"}").format(x)) for x in col]) for col in mat.T]
+    for x in mat:
+        for i, y in enumerate(x):
+            print(("{:"+str(col_maxes[i])+fmt+"}").format(y), end="  ")
+        print("")
+  
+# Try it!      
 
 class Manip:
     
-    def __init__(self,OFF_SET_XY  = 0,  U_OFFSET = 1, Z_OFFSET = 0, 
+    def __init__(self, OFF_SET_XY  = 0,  U_OFFSET = 1, Z_OFFSET = 0, 
                  r_tripod = 850e-6, OUTPUT_FLAG = False, verbose = False,
                  ZMAX = 700, ZMIN = 200, R_DROPLET_MIN=488, R_DROPLET_MAX=588,
-                 V0=0.3e-9, R_top = 150, P_end = [0,0,0]):
+                 V0=0.3e-9, R_top = 150, P_end = [0,0,0],
+                 delete_data =False):
         # Asign variables and flags
         self.OFF_SET_XY = OFF_SET_XY
         self.OFF_SET_XY_SOL = 0
@@ -64,18 +88,23 @@ class Manip:
         self.R_top = R_top # um
         self.ZMAX = ZMAX
         self.ZMIN = ZMIN
+        self.delete_data = delete_data
         self.w1 = np.array([self.r_tripod,0,0])*1e6
         self.w2 = np.array([-0.5, np.sqrt(3)/2, 0])*self.r_tripod*1e6   # um
         self.w3 = np.array([-0.5, -np.sqrt(3)/2, 0])*self.r_tripod*1e6
         self.b1 = self.w1.copy()
         self.b2 = self.w2.copy()
         self.b3 = self.w3.copy()
+        self.tol_solved = 5e-3
         self.P_end = P_end # Coordinates of End efector in movile coordinates
         self.data = None
         self.Init_SE_file() # init SE file with the Volume value
         self.Init_LinearModel()
     
     def Init_SE_file(self):
+        #sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        
+        #print(os.path.dirname(os.path.abspath(__file__)))
         # Add  an update of the PARAMETER ZMAX to avoid explotion of the 
         # surface It can be the radius of a half sphere of volume V...
         with open('fluid_joint.fe', 'r') as file:
@@ -89,9 +118,9 @@ class Manip:
         idx = np.where(a)[0][0] # Index where V0 is located
         content[idx] = f'PARAMETER RTOP = {self.R_top*1e-6:0.3e}  // \n'
         # Set Z in SE file
-        a = ["PARAMETER RTOP" in s for s in content]
+        a = ["PARAMETER ZMAX" in s for s in content]
         idx = np.where(a)[0][0] # Index where V0 is located
-        content[idx] = f'PARAMETER RTOP = {self.R_top*1e-6:0.3e}  // \n'
+        content[idx] = f'PARAMETER ZMAX = {self.ZMAX*1e-6:0.3e}  // \n'
         
         
         
@@ -165,13 +194,13 @@ class Manip:
         try:
             self.data = np.loadtxt(f'../data/Solutions_WS_{self.V0*1e9}uL.txt')
             # Delete data out of the range
-
-            for i in range(3):
-                idx = np.where(self.data[:,-(i+1)] >  self.R_DROPLET_MAX*1.001*1e-6)    
+            if self.delete_data:
+                for i in range(3):
+                    idx = np.where(self.data[:,-(i+1)] >  self.R_DROPLET_MAX*1.001*1e-6)    
                 
-                self.data = np.delete(self.data, idx, 0) # Remove data
-                idx = np.where(self.data[:,-(i+1)] < self.R_DROPLET_MIN*0.999*1e-6)    
-                self.data = np.delete(self.data, idx, 0) # Remove data
+                    self.data = np.delete(self.data, idx, 0) # Remove data
+                    idx = np.where(self.data[:,-(i+1)] < self.R_DROPLET_MIN*0.999*1e-6)    
+                    self.data = np.delete(self.data, idx, 0) # Remove data
                 
 
             R_N = R_from_vec(self.data[:,3:6].T)
@@ -183,14 +212,24 @@ class Manip:
         return
     
     def save_mesh(self,i):      
-        for j in range(3):
-        #    i = 99
-            old_file = os.path.join("", f'facet_{j+1}.txt')
-            new_file = os.path.join("", f"../data/mesh/facet_{j+1}_{i}.txt")
-            os.rename(old_file, new_file)
-            old_file = os.path.join("", f'vertex_{j+1}.txt')
-            new_file = os.path.join("", f"../data/mesh/vertex_{j+1}_{i}.txt")
-            os.rename(old_file, new_file)
+        # Directory paths
+        new_dir = "../data/mesh/"
+        
+        # Lists of base file names to be renamed
+        files_to_rename = [
+            ('facet', 3),
+            ('vertex', 3)
+        ]
+        
+        # Loop over files and perform batch renaming
+        for file_prefix, count in files_to_rename:
+            for j in range(count):
+                old_file = f'{file_prefix}_{j+1}.txt'
+                new_file = os.path.join(new_dir, f'{file_prefix}_{j+1}_{i}.txt')
+                if os.path.exists(new_file):
+                    # Delete the existing file
+                    os.remove(new_file)
+                os.rename(old_file, new_file)
         return   
     
     def get_idx_top_view(self,l_threshold=10):
@@ -217,7 +256,7 @@ class Manip:
         idx_side2 = np.append(np.array(idx_side),idx_side[0] )
         return idx_side, idx_side2
     
-    def plot_workspace(self, l_threshold=10,figsize=(2,1.5), ret_rad = False):
+    def plot_workspace(self, l_threshold=10,figsize=(2,1.5), ret_arg = False):
         '''
         Function that plot the workspace of the manipulator
 
@@ -281,12 +320,16 @@ class Manip:
         f.suptitle('Side view')
         plt.savefig("../data/figs/Side_WS.pdf", format="pdf", bbox_inches="tight")
         plt.show()
-        if ret_rad:
+        if ret_arg==1:
             return [self.data[idx_top,-3:], self.data[idx_side_XZ,-3:],self.data[idx_side_YZ,-3:]]
+        if ret_arg==2:
+            return [idx_top, idx_side_XZ, idx_side_YZ]
         else:
             ret
         
     def eqsystem_thread(self,H, rbase,j=None):
+        # rbase in m
+        # x,y,z in um
             x = H[0]
             y = H[1]
             z = H[2]
@@ -314,7 +357,22 @@ class Manip:
             if self.verbose:
                 txt = rf'φx: {a_x*180/np.pi:.2f}$^\circ$, θy: {a_y*180/np.pi:.2f}$^\circ$, ψz: {a_z*180/np.pi:.2f}$^\circ$'
                 print(txt)
+            # Check extremes of Z 
+            if z>self.ZMAX:
+                z = self.ZMAX
+            elif z<self.ZMIN:
+                z = self.ZMIN
+            # Check extremes of rbase
+            # Here I just run some checks, to be improved with good value
+            '''
+            if rbase > 1.2*self.ZMAX*1e-6:
+                print("rbase to high")
+                rbase = 1.2*self.ZMAX*1e-6
                 
+            elif rbase < self.ZMIN*1e-6:
+                print("rbase to low")
+                rbase = self.ZMIN*1e-6
+            '''
             fx, fy, fz, tx, ty, tz = calc_forces(x,y,z, a_x, a_y ,a_z, rbase, outputfiles=self.OUTPUT_FLAG, j=j)
             # projection to original xy axis
             f = np.array([fx,fy,fz])
@@ -322,18 +380,19 @@ class Manip:
             return f, t
         
     def eqsystem_forward(self, Q, *args):
+        # Receives the Q with the OFFSETS
         rbase1,rbase2,rbase3 = args
         if self.verbose:
             print(Q)
             
-        print_time = True
+        print_time = False
         if print_time:
             t0 = time.time() 
         #print('Q', Q)    
           #  input()
         #input()
         Q = Q.copy()
-        # Q is {u{3},P{3}}
+        # Q is {P{3}, u{3}}
         # rb is the base radius of each droplet
         #u_vec = np.ones(3)
         #u_vec[0:2] = Q[0:2]
@@ -379,7 +438,6 @@ class Manip:
             results = async_result.get()
         for result in results:
             #print(result)
-
             f.append(result[0])
             t.append(result[1])
         #if self.verbose:
@@ -450,6 +508,8 @@ class Manip:
         
         return Q0
     
+    
+    
     def forward_kinematics(self,rb1,rb2,rb3, Q0=None):
         # Q is the position and orientation vector of a initial point[P,u]
         # Return the Position and orientation of the frame refrence mobile P and u
@@ -457,103 +517,205 @@ class Manip:
         self.U_OFFSET_SOL = self.U_OFFSET
         self.Z_OFFSET_SOL = self.Z_OFFSET
         FLAG_SOLVE = True
+        FLAG_SOL_INDATA = False
+        FLAG_INTEPOLATED = False
+        rb1 = round(rb1, -7*int(floor(log10(abs(rb1)))))
+        rb2 = round(rb2, -7*int(floor(log10(abs(rb2)))))
+        rb3 = round(rb3, -7*int(floor(log10(abs(rb3)))))
+        rb_arr = np.array([rb1,rb2,rb3])
         if Q0 is not None:
             Q0[3:] = Q0[3:]+self.U_OFFSET_SOL
             Q0[0:2] = Q0[0:2] + self.OFF_SET_XY_SOL
             Q0[2] = Q0[2] +  self.Z_OFFSET_SOL
+            
         else:
             # If res is defined, find the closest value and use it as a Q0
             # if not stimate one initial value (can fail)
             try: 
                 
-                
+                if self.data is None:
+                    raise
+                    
                 Q0_arr = self.data[:,:6].copy()
                 Q0_arr[:,3:] = Q0_arr[:,3:]+self.U_OFFSET_SOL
                 Q0_arr[:,0:2] = Q0_arr[:,0:2] + self.OFF_SET_XY
                 Q0_arr[:,2] = Q0_arr[:,2] +  self.Z_OFFSET
-                Q0_in = self.data[:,6:]
-                # Reshape arrays to enable broadcasting
-                rb_arr = np.array([rb1,rb2,rb3])
+                
+                #Q0_in = self.data[:,6:]
+                Q0_in = self.data[:,6:9]
+
+                point = np.array([rb1,rb2,rb3])
+                # Round radius
+                #print('rb_arr',rb_arr)
                 array1_reshaped = rb_arr[np.newaxis, :] 
                 array2_reshaped = Q0_in[np.newaxis, :, :]  
     
                 # Calculate the norms between each element of array1 and array2
                 norms = np.linalg.norm(array1_reshaped - array2_reshaped, axis=2)
+               # print('norms shape: ',norms.shape)
                 # Find the index of the minimum norm for each element of array1
                 closest_indices = np.argmin(norms, axis=1)  # Shape: (128,)
-                
+                norms = norms.T
+               # print('closest_indices', closest_indices[0])
+               # print('norm',norms[closest_indices[0]])
+                #print('rb: ', array1_reshaped[closest_indices[0]])
+                #print('data: ', array2_reshaped[closest_indices[0]])      
                 Q0 = Q0_arr[closest_indices[0]].copy()
                 # Check if the solution exist, return it forwardly and not continue
-                #print(Q0)
-                point = np.array([rb1,rb2,rb3])
-                points = self.data[:,6:]
+                #print('Q0: ',Q0)
+                
+                points = self.data[:,6:9].copy()
+                #points = self.data[:,6:]
                 
                 # Check if the solution exist, return it forwardly and not continue
                 try: 
-                    x_tuples = tuple(point)
-                    y_tuples = [tuple(row) for row in points]
-                    index = y_tuples.index(x_tuples)
+                    
+                    tolerance = 1e-6  # Example tolerance value
+                    #print('norm',norms[closest_indices[0]])
+                    if norms[closest_indices[0]]>tolerance:
+                        #print(rb_arr)
+                        #print(array2_reshaped[closest_indices[0]])
+                        #print(norms[closest_indices[0]])
+                        #print('FAR')
+                        raise
+                    index = closest_indices[0]
+                    #index = y_tuples.index(x_tuples)
+#                    x_tuples = tuple(point)
+#                    print('x_tuples', x_tuples)
+#                    y_tuples = [tuple(row) for row in points]
+                    #print('y_tuples', y_tuples)
+#                    index = y_tuples.index(x_tuples)
+                    #print('ZXC')
                     Q0 = Q0_arr[index].copy()
                     #if index != 419:
                     #return self.data[index].copy() # Remove ths line to calculate it each time
                     FT = self.eqsystem_forward(Q0, *rb_arr)
-                    print(f'Norm FT: {np.linalg.norm(FT)} ')
+                    if self.verbose:
+                        print(f'Norm FT: {np.linalg.norm(FT)} ')
                     
-                    if np.linalg.norm(FT) < 3.0e-3:
+                    if np.linalg.norm(FT) <= self.tol_solved:
                         print('Sol. in data')
                         FLAG_SOLVE = False
                     
-                    if np.linalg.norm(FT) > 3.0e-3:
+                    if np.linalg.norm(FT) > self.tol_solved:
                         # Recalc
                         print('High norm')
+                        #print(index)
                         self.data = np.delete(self.data, index, 0) # Remove bad data
                         raise # Exception to interpolet guess
                         
                     if self.verbose:
                         print('Sol. in data')
+                        FLAG_SOL_INDATA = True
                         # Check if the forces are small
                         
                             
                     #return self.data[index].copy()
                 except:
                 # Linear interpolation
-                    FT = self.eqsystem_forward(Q0.copy(), *rb_arr)
+                    #FT = self.eqsystem_forward(Q0.copy(), *rb_arr)
                     
-                    values = Q0_arr
+                    values =  self.data[:,:6].copy()
+                    points = self.data[:,6:9].copy()
                     Q0 = self.init_guess(rb1,rb2,rb3)
                     #print('Q0 guess: ',Q0)
                     interp = LinearNDInterpolator(points, values, rescale=True)
-                    Q0 = interp(point).copy()
+                    #interp = RBFInterpolator(points, values, kernel='linear')
+                    #print(interp(point))
+                    Q0 = interp(point)[0].copy()
+                    Q0[3:] = Q0[3:] + self.U_OFFSET
                     print('Guess interpolated')
-                    print('Q0 interp: ',Q0)
+                   # print('Q0 interp: ',Q0)
                     #print(Q0)
-                    if any(np.isnan(Q0[0])):
-                        print('Q0 aproximated: Using spherical cap')
+                    if any(np.isnan(Q0)):
+                        print('NAN: Q0 aproximated: Using nearest and spherical')
+                        interp = NearestNDInterpolator(points, values)
+                        #print(interp(point))
+                        Q0 = interp(point)[0].copy()
+                        Q0[3:] = Q0[3:] + self.U_OFFSET        
+                        Q0_sp = self.init_guess(rb1,rb2,rb3)   
+                        Q0 = (Q0 + Q0_sp)/2
+                        if self.verbose: print('Q0 guess: ',Q0)
+                        if any(np.isnan(Q0)):
+                            if self.verbose: print('NAN: Q0 aproximated: Using spherical cap ')
                         #print('Nearest')
                         # if is outside the convex hull, takes the mean between closest value
                         # And the using spherical cap approximation
                         #Q0 = Q0_arr[closest_indices[0]]
-                        Q0 = self.init_guess(rb1,rb2,rb3)
-                        print('Q0 guess: ',Q0)
-                        
+                            Q0 = self.init_guess(rb1,rb2,rb3)
+                            #print('Q0 guess: ',Q0)
+                    # check if the approximation is good enough
+                    FT = self.eqsystem_forward(Q0, *rb_arr)                            
+                    if np.linalg.norm(FT) <= self.tol_solved:
+                        print('Interpolation is good')
+                        FLAG_SOLVE = False
+                        FLAG_INTEPOLATED = True
+                        sol = Q0.copy()
+                        sol[3:] = sol[3:] - self.U_OFFSET_SOL
+                        sol[0:2] = sol[0:2] - self.OFF_SET_XY
+                        output = np.concatenate((sol,np.array([rb1,rb2,rb3])))
+                        #print(f'output: {output}')
+                    else:
+                        print(f'Interpolation not good enough: {np.linalg.norm(FT)}')
                  #   print(Q0)
             except:
-                print('Q0 aproximated: Using spherical cap')
-                #print(np.mean([rb1,rb2,rb3]))
-                Q0 = self.init_guess(rb1,rb2,rb3) # With offset
-                Q0_clean = Q0.copy()
-                Q0_clean[3:] = Q0_clean[3:]-np.ones_like(Q0_clean[3:])*self.U_OFFSET
-                print('Q0 guess: ',Q0_clean)
+                print('Q0 aproximated: Using nearest and s; 1')
+                Q0_sp = self.init_guess(rb1,rb2,rb3)   
+                #print(Q0_sp)
+                #print('checkpoint 0') 
+                #print(self.data)
+                if self.data is not None:
+                    
+                    values =  self.data[:,:6].copy()
+                    points = self.data[:,6:9]
+                    interp = NearestNDInterpolator(points, values)
+                    #print(interp(point))
+                    Q0 = interp(point)[0].copy()
+                    Q0[3:] = Q0[3:] + self.U_OFFSET        
+                    Q0 = (Q0 + Q0_sp)/2
+                else:
+                    Q0 = Q0_sp.copy()
                 
+                #print('checkpoint 0')    
+                
+                if any(np.isnan(Q0)):
+                    print('NAN: Q0 aproximated: Using spherical cap ')
+                    #print('Q0 aproximated: Using spherical cap')
+                    #print(np.mean([rb1,rb2,rb3]))
+                    Q0 = self.init_guess(rb1,rb2,rb3) # With offset
+                    Q0_clean = Q0.copy()
+                    Q0_clean[3:] = Q0_clean[3:]-np.ones_like(Q0_clean[3:])*self.U_OFFSET
+                    #print('Q0 guess: ',Q0_clean)
+                    
+                print('checkpoint 1')    
+                FT = self.eqsystem_forward(Q0, *rb_arr)   
+                
+                if np.linalg.norm(FT) <= self.tol_solved:
+                    print('Interpolation is good')
+                    FLAG_SOLVE = False
+                    FLAG_INTEPOLATED = True
+                    sol = Q0.copy()
+                    sol[3:] = sol[3:] - self.U_OFFSET_SOL
+                    sol[0:2] = sol[0:2] - self.OFF_SET_XY
+                    output = np.concatenate((sol,np.array([rb1,rb2,rb3])))
+                    #print(f'output: {output}')
+                    
+                else:
+                    print(f'Interpolation not good enough: {np.linalg.norm(FT)}')
+                 
         if self.verbose:
             t0 = time.time() 
         
             
         if FLAG_SOLVE:
             ## Here use linear interpolation model to get a good first guess Q0
+            # Before solve it, check if the interpolation is good:
+                
+            #FT = self.eqsystem_forward(Q0.copy(), *rb_arr)
             
+                    
             res = fsolve(self.eqsystem_forward, Q0.copy(),args=tuple([rb1,rb2,rb3]), fprime=self.Jacob_forward,
-                         epsfcn=1e-5, factor=100, full_output=True, xtol=1e-7)
+                         epsfcn=1e-4, factor=100, full_output=True, xtol=1e-6)
         
             sol = res[0].copy()
             info = res
@@ -561,8 +723,8 @@ class Manip:
                 print(info)
                 print(f'Norm: {np.linalg.norm(info[1]["fvec"]):0.2e}')
         # Remove offset of the solution
-            sol[3:] = sol[3:]-1
-            sol[0:2] = sol[0:2] -self.OFF_SET_XY
+            sol[3:] = sol[3:] - self.U_OFFSET_SOL
+            sol[0:2] = sol[0:2] - self.OFF_SET_XY
             if self.verbose:
                 print(f'Solved in {time.time()-t0:0.1f} (s)')
             
@@ -573,21 +735,46 @@ class Manip:
         
         
         # When is solved, add the data to the current data
-        if FLAG_SOLVE:
+        if FLAG_SOLVE or FLAG_INTEPOLATED:
             output = np.concatenate((sol,np.array([rb1,rb2,rb3])))
-            print(f'Norm: {np.linalg.norm(info[1]["fvec"]):0.2e}')
+            if FLAG_SOLVE:
+                print(f'Norm: {np.linalg.norm(info[1]["fvec"]):0.2e}')
+            else:
+                print(f'Norm: {np.linalg.norm(FT):0.2e}') 
         else:
             output = self.data[index].copy()
         #print(output.shape)
         if self.data is not None:
             # just save if was solved otherwise the sol exist in the database
-            if FLAG_SOLVE:
-                self.data = np.append(self.data,np.reshape(output,(1,9)),axis=0)
+            if FLAG_SOLVE or FLAG_INTEPOLATED:
+                if FLAG_SOLVE:
+                    if np.linalg.norm(info[1]["fvec"]) <  self.tol_solved: 
+                        self.data = np.append(self.data,np.reshape(output,(1,9)),axis=0)
+                        self.save_data()
+                    else:
+                        print('Norm to high not saved')
+                elif FLAG_INTEPOLATED :
+                    self.data = np.append(self.data,np.reshape(output,(1,9)),axis=0)
+                
                 
         else:
+            print('HERE')
             self.data = np.reshape(output,(1,9))
         
-            
+        # Add the solution to the end effector list
+        #self.End_effector = R_N@self.P_end + P_N   
+        if not FLAG_SOL_INDATA or FLAG_INTEPOLATED:
+            u_r = output[3:].copy()
+            R = R_from_vec(u_r)
+            P = output[0:3].copy()
+            End_effector = R@self.P_end + P
+            #End_effector = End_effector[:,np.newaxis]
+            #print(End_effector.shape)
+            if hasattr(self, 'End_effector'):
+                self.End_effector = np.vstack([self.End_effector,End_effector.reshape(1, 3)])
+            else:
+                self.End_effector = np.vstack([End_effector.reshape(1, 3)])
+                
         return output
  
     
@@ -673,8 +860,11 @@ class Manip:
 
     def Jacob_inverse(self,Q, *args):
         # Computes the jacobian for the inverse kinematics
-        d = 1e-4
-        d_ang = 1e-4
+        flag_debug = True
+        if flag_debug: print("Jacob:")
+        if flag_debug: print(Q)
+        d = 2e-5 # radii in m
+        d_ang = 0.1*np.pi/180.0 # angles
         JM = np.zeros((6,6))
         rx, ry, rz = args
         # create the thread pool
@@ -699,36 +889,53 @@ class Manip:
             JM[:,i] = dF_l[i]/d
         for i  in range(3):
             JM[:,i+3] = dF_l[i+3]/d_ang
+            
+        if flag_debug: print('JAcobian: ')
+        if flag_debug:  matprint(JM)
+        
         return JM
     
     def Jacob_forward(self,Q, *args):
         # Computes the jacobian for the inverse kinematics
-        d = 1e-4
+        # Receives the Q with OFFSETS
+        flag_debug = False
+        if flag_debug: print("Jacob:")
+        if flag_debug: print(Q)
+        d = 0.1 # um
+        d_ang = 0.1*np.pi/180.0
+        diag = [d,d,d,d_ang,d_ang,d_ang]
+        d_m = np.diag(diag)
         JM = np.zeros((6,6))
         rx, ry, rz = args
         # create the thread pool
-        print_time = True
+        print_time = False
         if print_time:
             t0 = time.time() 
-        Q_l = np.array([Q.copy() for i in range(6)]) + np.eye(6)*d
+        
+        Q_l = np.array([Q.copy() for i in range(6)]) + d_m
         Q_l = np.append(Q_l,[Q.copy()],axis=0)
         with ThreadPool() as pool:
-            args = [(Q_l[i],*args) for i in range(len(Q_l))]
-            async_result = pool.starmap_async(self.eqsystem_forward, args)
+            args_pool = [(Q_l[i],*args) for i in range(len(Q_l))]
+            async_result = pool.starmap_async(self.eqsystem_forward, args_pool)
             results = async_result.get()
         # iterate return values and report
         dF = []
         for result in results:
+          #  print('results: ', result)
             dF.append(result)    
-        dF_l = []
-        for i in range(6):
-            dF_l.append(dF[i]-dF[-1])
         
-        for i  in range(6):
-            JM[:,i] = dF_l[i]/d
-        #print(JM)
+        for i in range(6):
+            dF.append(dF[i]-dF[-1])
+        
+        for i  in range(3):
+            JM[:,i] = dF[i]/d
+        for i  in range(3):
+            JM[:,i+3] = dF[i+3]/d_ang
+        
         if print_time:
             print(f'Jacobian computed in {time.time()-t0:0.1f} (s)')
+        if flag_debug: print('JAcobian: ')
+        if flag_debug:  matprint(JM)
         return JM
     
     def Inverse_kinematics(self, r_end, X0=None, verbose=False):
@@ -758,7 +965,7 @@ class Manip:
         else:
             # If res is defined, find the closest value and use it as a Q0
             # if not stimate one initial value (can fail)
-            #try: 
+            #try:   
             Q0_arr = self.data[:,np.array([6,7,8,3,4,5])].copy()
             Q0_arr[:,3:] = Q0_arr[:,3:]+self.U_OFFSET_SOL
             
@@ -791,7 +998,7 @@ class Manip:
             
         res = fsolve(self.eqsystem_inverse, X0.copy(), fprime=self.Jacob_inverse,
                      args=tuple([r_end[0],r_end[1],r_end[2]]),
-                      epsfcn=1e-5, factor=100, full_output=True, xtol=1e-7)
+                      epsfcn=1e-5, factor=100, full_output=True, xtol=1e-8)
         
         sol = res[0].copy()
         info = res
@@ -1069,7 +1276,7 @@ class Manip:
     
     def save_data(self):
         
-        np.savetxt(f'../data/Solutions_WS_{self.V0*1e9}uL.txt',self.data, fmt='%.10e')
+        np.savetxt(f'../data/Solutions_WS_{self.V0*1e9}uL.txt', self.data, fmt='%.6e')
     
     def my_function_star(self, args):
         return eq_system_multithread(*args)    
@@ -1083,9 +1290,9 @@ class Manip:
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection="3d")
-        ax.scatter(pts[:,0],pts[:,1],pts[:,2], alpha=0.1)
+        #ax.scatter(pts[:,0],pts[:,1],pts[:,2], alpha=0.1)
         
-        '''
+        
         verts = pts
         hull = ConvexHull(verts)
         faces = hull.simplices
@@ -1093,7 +1300,7 @@ class Manip:
 
         triangles = []
         for s in faces:
-            print(s)
+            #print(s)
             sq = [
                 (verts[s[0], 0], verts[s[0], 1], verts[s[0], 2]),
                 (verts[s[1], 0], verts[s[1], 1], verts[s[1], 2]),
@@ -1102,19 +1309,155 @@ class Manip:
             triangles.append(sq)
 
         
-        new_faces =WS_3D.simplify(triangles)
+        new_faces = WS_3D.simplify(triangles)
         for sq in new_faces:
             print(np.array(list(sq)).shape)
             triang = np.array(list(sq))
-            ax.plot(triang[:,0],triang[:,1],triang[:,2])
+            ax.plot(triang[:,0],triang[:,1],triang[:,2], alpha=0.0)
             f = a3.art3d.Poly3DCollection([np.array(list(sq))])
             #f.set_color(colors.rgb2hex(sp.rand(3)))
-            #f.set_edgecolor('k')
+            f.set_edgecolor('k')
             f.set_alpha(0.1)
             ax.add_collection3d(f)
-        '''            
+        
         plt.show()    
         return
     
+    
+    def plot_test(self):
+        
+       # mesh = pyvista.read(r'../data/Printed_00.stl')
+       # mesh.plot()
+        
+        
+        j = 1
+        i = 1
+        
+        file_path = f'../data/mesh/vertex_{j}_{i}.txt'
+        data = pd.read_csv(file_path, sep=' ', header=None).to_numpy()
+        print(data.shape)
+        idx_v = data[:,0].astype(int)
+        idx_n = np.arange(len(idx_v))
+        #verts = data[:,1:]*1e6
+        verts = data[:,:].copy()
+        verts[:,1:] = verts[:,1:]*1e6
+        
+        
+        verts[:,1] = verts[:,1]#+v1[0]
+        verts[:,2] = verts[:,2]#+v1[1]
+        #verts_dict = dict(zip(verts[:, 0], verts[:, 1:]))
+        
+        data = np.loadtxt(f'../data/mesh/facet_{j}_{i}.txt')
+        
+        facets = data.copy()
+        faces_orig = data[:,1:4].astype(int)
+        cols = data[:,-1].astype(int)
+        faces = faces_orig.copy()
+        faces = faces[cols[:].argsort()]
+        
+        
+        mesh = pv.PolyData(verts, faces)
+        mesh.plot(show_edges=True, line_width=5)
+        
 
+#        tripod_mesh = mesh.Mesh.from_file(r'../data/Printed_00.stl')
+#        tripod_mesh.vectors = tripod_mesh.vectors
+        
+        
+        return
+    
+    def pv_plot(self, data_plot, pl=None,update_cams=False, bg_plot = False):
+        if data_plot.ndim == 1:
+            data_plot = data_plot.reshape(1, -1)
+        save_meshes(self, data_plot)
+        if pl is None:
+            if bg_plot:
+                pl = BackgroundPlotter(window_size=(2048, 1536), shape="1|2",
+                                        lighting='none')
+            else:
+                pl = pv.Plotter(window_size=([2048, 1536]), shape="1|2",
+                            lighting='none')
+            pl.enable_anti_aliasing('fxaa')
+            pl.enable_lightkit()
+        
+        resf = data_plot[0]
+        
+        w = [self.w1, self.w2, self.w3]
+        file_path = '../data/Printed_00.stl'
+        P = resf[0:3].copy()
+        u_r = resf[3:].copy()
+    
+        pl.subplot(0)
+        plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        if update_cams:
+            pl.camera.zoom(1.5)
+            cam_pos = [(-pl.camera_position[0][0], -pl.camera_position[0][1], pl.camera_position[0][2]-500),
+                       (-pl.camera_position[1][0], -pl.camera_position[1][1], pl.camera_position[1][2]-500),
+                       (pl.camera_position[2][0], pl.camera_position[2][1], pl.camera_position[2][2])]
+            pl.camera_position = cam_pos
+        #pl.camera_position = 'yz'
+        pl.subplot(1)
+        plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        #pl.add_points(End_effector)
+        pl.camera_position = 'xy'
+        
+        pl.camera.zoom(4)
+        #line = pv.Line((0, 0, 0), (0, 0, 20))
+        
+        pl.add_legend_scale(number_minor_ticks=2,left_axis_visibility=False,
+                            bottom_axis_visibility=False,
+                            right_border_offset=60,top_border_offset=60,
+                            legend_visibility=False,font_size_factor=1,
+                            )
+        #pl.show_grid()
+        pl.subplot(2)
+        plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        pl.camera_position = 'yz'
+        pl.camera.azimuth = 180
+        
+        pl.camera.zoom(4)
+        pl.add_legend_scale(number_minor_ticks=2,left_axis_visibility=False,
+                            bottom_axis_visibility=False,
+                            right_border_offset=60,top_border_offset=60,
+                            legend_visibility=False,font_size_factor=1,
+                            )
+        cam_pos = [(pl.camera_position[0][0], pl.camera_position[0][1], pl.camera_position[0][2]+300),
+                   (pl.camera_position[1][0], pl.camera_position[1][1], pl.camera_position[1][2]+300),
+                   (pl.camera_position[2][0], pl.camera_position[2][1], pl.camera_position[2][2])]
+        pl.camera_position = cam_pos
+        
+        return pl
+        #_ = pl.add_mesh(mesh, color='blue',show_edges=True, opacity=0.5)
+        #pl.show_grid()
+        
+if __name__ == "__main__":
+    P_end = np.array([-380,0,630]) # ANTENNA as end effector
+    DROPLET_VOLUME = 0.102e-9#0.22e-9
+    theta_0 = 135*np.pi/180
+    theta_min = 60*np.pi/180
+    r_min = (3*DROPLET_VOLUME*np.sin(theta_0)**2/(np.pi*(2+np.cos(theta_0))*(1-np.cos(theta_0))**2))**(1/3)*1e6
+    r_max = (3*DROPLET_VOLUME*np.sin(theta_min)**2/(np.pi*(2+np.cos(theta_min))*(1-np.cos(theta_min))**2))**(1/3)*1e6
+    #r_min = (DROPLET_VOLUME*3/(2*np.pi))**(1/3)*1e6
+    r_min = np.round(r_min*1.0,0)
+    r_max = np.round(r_max*1.052,0)
+    print(r_min)
+    print(r_max)
+    robot = Manip(P_end=P_end, V0=DROPLET_VOLUME,R_DROPLET_MIN=r_min, R_DROPLET_MAX=r_max,                    
+                        ZMAX=600, ZMIN=200, R_top=150)
+    # Load Data
+    robot.load_data()
+    r1 = 240*1e-6
+    r2 = 400*1e-6
+    r3 = 440*1e-6
+    D1 = robot.forward_kinematics(r1,r2,r3)
+    print(D1)
+    data_plot = robot.data.copy()
+    
+    #
+    frame = -1
+    data_plot = D1
+    print(data_plot)
+    pl = robot.pv_plot(data_plot)
+    pl.show()
 
+        
