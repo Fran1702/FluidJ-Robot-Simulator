@@ -1,4 +1,4 @@
-![FluidJ Robot Simulator Logo](images/logo.png)
+![FluidJ Robot Simulator Logo](logo.png)
 
 # FluidJ Robot Simulator
 
