@@ -1389,12 +1389,14 @@ class Manip:
     
         pl.subplot(0)
         plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        pl.camera.azimuth = 90
         if update_cams:
             pl.camera.zoom(1.5)
             cam_pos = [(-pl.camera_position[0][0], -pl.camera_position[0][1], pl.camera_position[0][2]-500),
                        (-pl.camera_position[1][0], -pl.camera_position[1][1], pl.camera_position[1][2]-500),
                        (pl.camera_position[2][0], pl.camera_position[2][1], pl.camera_position[2][2])]
             pl.camera_position = cam_pos
+
         #pl.camera_position = 'yz'
         pl.subplot(1)
         plot_robot(pl,0,w,P,u_r,file_path=file_path)

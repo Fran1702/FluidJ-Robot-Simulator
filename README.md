@@ -1,37 +1,89 @@
-The FluidJ Robot Simulator serves as a comprehensive tool for analyzing both
-forward and inverse kinematics in microrobots equipped with fluid joints.
+![FluidJ Robot Simulator Logo](images/logo.png)
 
-Folder structure:
+# FluidJ Robot Simulator
 
-- /temp: saves the temporary files to create the mesh video
-- /src: Code
-- /data: stl file of the endplatform 
-- /data/mesh: mesh of the fluid joints 
-- /data/vids: output videos
-- /data/figs: output figs
+The **FluidJ Robot Simulator** is a comprehensive tool designed to analyze both forward and inverse kinematics in microrobots equipped with fluid joints. This repository provides the necessary code and resources to simulate and visualize these operations effectively.
+
+---
+
+## 📂 Folder Structure
+
+The repository is organized as follows:
+
+- **`/temp`**  
+  Temporary files used for creating the mesh videos.
+
+- **`/src`**  
+  Source code for the simulator.
+
+- **`/data`**  
+  - `stl`: Contains the STL file of the end platform.  
+  - `mesh`: Mesh data for the fluid joints.  
+  - `vids`: Generated output videos.  
+  - `figs`: Generated output figures.
+
+---
+
+## 🚀 Getting Started
+
+To use the FluidJ Robot Simulator, follow these steps:
+
+### 1. Install **Surface Evolver**
+Ensure that [Surface Evolver](http://kenbrakke.com/evolver/html/install.htm) is installed on your system. Follow the official installation instructions provided on their website.
+
+### 2. Clone the Repository
+In your terminal, run:
+```bash
+git clone https://github.com/Fran1702/FluidJ-Robot-Simulator
+```
 
 
-### How to run
+
+### 3. Install Python Dependencies
+Navigate to the project folder and install the required Python packages:
+
+```bash
+cd FluidJ-Robot-Simulator
+python -m pip install -r requirements.txt
+```
 
 
-Surface Evolver needs to be installed in the system.
-Follow the official documentation: http://kenbrakke.com/evolver/html/install.htm
+### 4. Run the Simulator
+Navigate to the `src` directory:
+```bash
+cd src
+```
 
-In terminal linux:
+Run the forward kinematics simulation example by executing the `main_fk.py` script:
 
-Clone this repository
-'git clone https://github.com/Fran1702/FluidJ-Robot-Simulator'
+```bash
+python main_fkin.py
+```
 
-Move to the folder and install the python requierements
+## ⚙️ Features
 
-'cd FluidJ-Robot-Simulator && python -m pip install -r requirements.txt'
+- Analyze **forward kinematics** and **inverse kinematics** for microrobots with fluid joints.
+- Generate and visualize simulations: of a fluid-joint based microrobot.
 
-Change to the src directory:
+---
 
-'cd src
+## 🛠️ Dependencies
 
-Run the main_fk.py file as an example of the forward kinematics:
+Ensure the following are installed on your system:
+- **Python 3.8+**
+- **Surface Evolver**: [Installation Instructions](http://kenbrakke.com/evolver/html/install.htm)
+- Additional Python packages (listed in `requirements.txt`).
 
-'python main_fkin.py '
+---
+
+## 📬 Contact
+
+For questions, issues, or suggestions, feel free to reach out by opening an issue in this repository or contacting the maintainer directly.
+
+---
+
+## 📜 License
+
+This repository is licensed under the [MIT License](LICENSE).
 
 
