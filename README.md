@@ -1,4 +1,5 @@
-![FluidJ Robot Simulator Logo](logo.png)
+
+<img src="logo.png" alt="FluidJ Robot Simulator Logo" width="300"/>
 
 # FluidJ Robot Simulator
 
