@@ -7,17 +7,29 @@ def set_variables():
     global R1, R2, R3
     try:
         # Prompt user for values; if empty, keep the previous value
-        new_R1 = input(f"Enter new value for R1 (current: {R1}): ").strip()
+        new_R1 = input(f"Enter new value for R1 (current: {R1}, range: {r_min}-{r_max}): ").strip()
         if new_R1:
-            R1 = float(new_R1)
+            R1_candidate = float(new_R1)
+            if r_min <= R1_candidate <= r_max:
+                R1 = R1_candidate
+            else:
+                print(f"Value out of range! R1 must be between {r_min} and {r_max}.")
         
-        new_R2 = input(f"Enter new value for R2 (current: {R2}): ").strip()
+        new_R2 = input(f"Enter new value for R2 (current: {R2}, range: {r_min}-{r_max}): ").strip()
         if new_R2:
-            R2 = float(new_R2)
+            R2_candidate = float(new_R2)
+            if r_min <= R2_candidate <= r_max:
+                R2 = R2_candidate
+            else:
+                print(f"Value out of range! R2 must be between {r_min} and {r_max}.")
         
-        new_R3 = input(f"Enter new value for R3 (current: {R3}): ").strip()
+        new_R3 = input(f"Enter new value for R3 (current: {R3}, range: {r_min}-{r_max}): ").strip()
         if new_R3:
-            R3 = float(new_R3)
+            R3_candidate = float(new_R3)
+            if r_min <= R3_candidate <= r_max:
+                R3 = R3_candidate
+            else:
+                print(f"Value out of range! R3 must be between {r_min} and {r_max}.")
         
         print(f"Updated variables: R1={R1}, R2={R2}, R3={R3}")
     except ValueError:
@@ -75,6 +87,7 @@ if __name__ == "__main__":
             pl.clear_actors()
         elif command == "s":
             set_variables()
+            print('Solving kinematics: Please wait...')
             D1 = robot.forward_kinematics(R1*1e-6, R2*1e-6, R3*1e-6)
             data_plot = D1
             pl.clear_actors()
