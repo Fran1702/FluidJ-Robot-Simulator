@@ -21,7 +21,7 @@ The repository is organized as follows:
 
 - **`/data`**  
   - `stl`: Contains the STL file of the end platform.  
-  - `mesh`: Mesh data for the fluid joints.  
+  - `/mesh`: Mesh data for the fluid joints.  
   - `vids`: Generated output videos.  
   - `figs`: Generated output figures.
 
