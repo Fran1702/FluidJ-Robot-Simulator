@@ -9,6 +9,7 @@ Created on Fri Nov 29 10:11:31 2024
 import numpy as np
 import pandas as pd
 import pyvista as pv
+import re
 from forces_eq import *
 
 def save_meshes(robot,anim_data):
@@ -47,8 +48,62 @@ def update_indices(index_array, data_array):
     
     return updated_data
 
+def save_droplet_stl():
+    vertex_l, facets_l = get_list_vert_facet_files()
+    print(vertex_l)
+    print(facets_l)
 
-def mesh_droplet(i,j,w):
+    # Extract the part before '.txt'
+    for filename in vertex_l:
+        base = filename.split(".txt")[0]
+        # Extract the last two parts split by "_"
+        parts = base.split("_")[-2:]  # Take only the last two parts
+        # Extract i and j
+        i, j = map(int, parts)
+        # Get mesh
+        mesh,c,a = mesh_droplet(j,i)["mesh0"]
+        mesh.save(f'../data/mesh/mesh_{i}_{j}.stl')
+
+def get_list_vert_facet_files():
+        # Folder containing the files
+    folder_path = '../data/mesh'
+
+    # Lists to hold filenames
+    vertex_files = []
+    face_files = []
+
+    # Dictionary to group by (i, j)
+    grouped_files = {}
+
+    # Iterate through files in the folder
+    for filename in os.listdir(folder_path):
+        if filename.startswith("vertex_") or filename.startswith("facet_"):
+            parts = filename.split("_")
+            if len(parts) == 3:
+                prefix, i, j_with_ext = parts
+                j = os.path.splitext(j_with_ext)[0]  # Remove extension from j
+                key = (i, j)
+                
+                # Initialize the key in the dictionary if it doesn't exist
+                if key not in grouped_files:
+                    grouped_files[key] = {"vertex": None, "facet": None}
+                
+                # Assign filenames to the correct group
+                if prefix == "vertex":
+                    grouped_files[key]["vertex"] = filename
+                elif prefix == "facet":
+                    grouped_files[key]["facet"] = filename
+
+    # Separate the grouped files into respective lists
+    for key, files in grouped_files.items():
+        if files["vertex"]:
+            vertex_files.append(files["vertex"])
+        if files["facet"]:
+            face_files.append(files["facet"])
+    return vertex_files, face_files
+
+
+def mesh_droplet(i,j,w=[0,0,0], save_stl=False):
     
     file_path = f'../data/mesh/vertex_{j}_{i}.txt'
     data = pd.read_csv(file_path, sep=' ', header=None).to_numpy()
@@ -101,21 +156,31 @@ def mesh_droplet(i,j,w):
                "mesh0": (mesh0, color0, alpha0),
              #  "mesh1": (mesh1, color1, alpha1)
               }
+    if save_stl:
+        base_path = f'../data/mesh/mesh_{i}_{j}'
+        file_path = f'{base_path}.stl'
+        counter = 1
+        
+        # Check if file exists and modify the name until it's unique
+        while os.path.exists(file_path):
+            file_path = f'{base_path}_{counter}.stl'
+            counter += 1
+        
+        mesh0.save(file_path)
     return mesh_d
 
-def create_mesh_stl(file_path, P,u_r, scale=1e3): 
+def create_mesh_stl(file_path, P,u_r, scale=1e3, save_stl=False): 
     mesh = pv.read(file_path).scale(scale)
     R = R_from_vec(u_r)
     M_44 = np.zeros((4,4))
     M_44[:-1,-1] = P#/1000
     M_44[:-1,:-1] = R
     M_44[-1,-1] = 1
-    mesh = mesh.rotate_vector((0, 0, 1), 180)
     return mesh.transform(M_44)
 
-def plot_robot(plotter,i,w,P,u_r,file_path):
+def plot_robot(plotter,i,w,P,u_r,file_path, save_stl=False):
     for j in range(1,4):
-        mesh_d = mesh_droplet(i, j, w[j-1])
+        mesh_d = mesh_droplet(i, j, w[j-1], save_stl)
         for name, (mesh, color, opacity) in mesh_d.items():
             _=plotter.add_mesh(mesh, color=color, opacity=opacity, label=name,
                                split_sharp_edges=True,
@@ -123,6 +188,17 @@ def plot_robot(plotter,i,w,P,u_r,file_path):
     # Plot tripod
 
     mesh = create_mesh_stl(file_path, P, u_r)
+    if save_stl:
+        base_path = f'../data/mesh/platform_{i}_{j}'
+        file_path = f'{base_path}.stl'
+        counter = 1
+        
+        # Check if file exists and modify the name until it's unique
+        while os.path.exists(file_path):
+            file_path = f'{base_path}_{counter}.stl'
+            counter += 1
+        
+        mesh.save(file_path)
     
     # Plot table
     vertices = np.array([[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0]]).astype(float)*1000.0*1.5
@@ -136,3 +212,7 @@ def plot_robot(plotter,i,w,P,u_r,file_path):
     _= plotter.add_mesh(mesh, color="red", show_edges=False, split_sharp_edges=True,
                      #   pbr=True,
                         specular=0.5, diffuse=0.5,ambient=0.5,specular_power=30)
+
+
+if __name__ == "__main__":
+    save_droplet_stl()

@@ -67,69 +67,71 @@ def matprint(mat, fmt="g"):
 
 class Manip:
     
-    def __init__(self, OFF_SET_XY  = 0,  U_OFFSET = 1, Z_OFFSET = 0, 
-                 r_tripod = 850e-6, OUTPUT_FLAG = False, verbose = False,
-                 ZMAX = 700, ZMIN = 200, R_DROPLET_MIN=488, R_DROPLET_MAX=588,
-                 V0=0.3e-9, R_top = 150, P_end = [0,0,0],
-                 delete_data =False):
+    def __init__(self, offset_xy  = 0,  u_offset = 1, z_offset = 0, 
+                 w = None, r_tripod = 850e-6, OUTPUT_FLAG = False, verbose = False,
+                 z_max = 700, z_min = 200, r_droplet_min=488, r_droplet_max=588,
+                 vol=0.3e-9, r_top = 150, p_end = [0,0,0],
+                 delete_data =False, stl_name = 'Printed_00'):
+        
         # Asign variables and flags
-        self.OFF_SET_XY = OFF_SET_XY
-        self.OFF_SET_XY_SOL = 0
-        self.U_OFFSET = U_OFFSET
-        self.U_OFFSET_SOL = 0
-        self.Z_OFFSET = Z_OFFSET
-        self.Z_OFFSET_SOL = 0
+        self.offset_xy = offset_xy
+        self.offset_xy_sol = 0
+        self.u_offset = u_offset
+        self.u_offset_sol = 0
+        self.z_offset = z_offset
+        self.z_offset_sol = 0
         self.r_tripod = r_tripod
         self.OUTPUT_FLAG = OUTPUT_FLAG
         self.verbose = verbose
-        self.R_DROPLET_MIN = R_DROPLET_MIN
-        self.R_DROPLET_MAX = R_DROPLET_MAX
-        self.V0 = V0
-        self.R_top = R_top # um
-        self.ZMAX = ZMAX
-        self.ZMIN = ZMIN
+        self.r_droplet_min = r_droplet_min
+        self.r_droplet_max = r_droplet_max
+        self.vol = vol
+        self.r_top = r_top # um
+        self.z_max = z_max
+        self.z_min = z_min
         self.delete_data = delete_data
-        self.w1 = np.array([self.r_tripod,0,0])*1e6
-        self.w2 = np.array([-0.5, np.sqrt(3)/2, 0])*self.r_tripod*1e6   # um
-        self.w3 = np.array([-0.5, -np.sqrt(3)/2, 0])*self.r_tripod*1e6
+        if w is None:
+            self.w1 = np.array([self.r_tripod,0,0])*1e6
+            self.w2 = np.array([-0.5, np.sqrt(3)/2, 0])*self.r_tripod*1e6   # um
+            self.w3 = np.array([-0.5, -np.sqrt(3)/2, 0])*self.r_tripod*1e6
+        else:
+            self.w1 = w[0]
+            self.w2 = w[1]
+            self.w3 = w[2]
         self.b1 = self.w1.copy()
         self.b2 = self.w2.copy()
         self.b3 = self.w3.copy()
         self.tol_solved = 5e-3
-        self.P_end = P_end # Coordinates of End efector in movile coordinates
+        self.p_end = p_end # Coordinates of End efector in movile coordinates
         self.data = None
+        self.stl_path = '../data/'+stl_name+'.stl'
+        name = f'DB_{self.vol}_{self.r_top}'
+        for w in [self.w1, self.w2, self.w3]:
+            name = name + '_'+ ",".join(map(str, w.flatten()))
+        self.fname = name
         self.Init_SE_file() # init SE file with the Volume value
         self.Init_LinearModel()
     
     def Init_SE_file(self):
-        #sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        
-        #print(os.path.dirname(os.path.abspath(__file__)))
-        # Add  an update of the PARAMETER ZMAX to avoid explotion of the 
+        # Add  an update of the PARAMETER z_max to avoid explotion of the 
         # surface It can be the radius of a half sphere of volume V...
         with open('fluid_joint.fe', 'r') as file:
             content = file.readlines()
         # Set volume in SE file
         a = ["PARAMETER V0" in s for s in content]
-        idx = np.where(a)[0][0] # Index where V0 is located
-        content[idx] = f'PARAMETER V0 = {self.V0:0.3e}  // mm3 \n'
+        idx = np.where(a)[0][0] # Index where vol is located
+        content[idx] = f'PARAMETER V0 = {self.vol:0.3e}  // mm3 \n'
         # Set Rtop in SE file
         a = ["PARAMETER RTOP" in s for s in content]
-        idx = np.where(a)[0][0] # Index where V0 is located
-        content[idx] = f'PARAMETER RTOP = {self.R_top*1e-6:0.3e}  // \n'
+        idx = np.where(a)[0][0] # Index where vol is located
+        content[idx] = f'PARAMETER RTOP = {self.r_top*1e-6:0.3e}  // \n'
         # Set Z in SE file
         a = ["PARAMETER ZMAX" in s for s in content]
-        idx = np.where(a)[0][0] # Index where V0 is located
-        content[idx] = f'PARAMETER ZMAX = {self.ZMAX*1e-6:0.3e}  // \n'
-        
-        
-        
+        idx = np.where(a)[0][0] # Index where vol is located
+        content[idx] = f'PARAMETER ZMAX = {self.z_max*1e-6:0.3e}  // \n'
         # and write everything back
         with open('fluid_joint.fe', 'w') as file:
             file.writelines(content)
-            
-            
-        
         return
           
     def Plot_radius_grid(self):
@@ -192,20 +194,21 @@ class Manip:
             
         #os.chdir("../data")
         try:
-            self.data = np.loadtxt(f'../data/Solutions_WS_{self.V0*1e9}uL.txt')
+            #self.data = np.loadtxt(f'../data/Solutions_WS_{self.vol*1e9}uL.txt')
+            self.data = np.loadtxt(f'../data/{self.fname}.txt')
             # Delete data out of the range
             if self.delete_data:
                 for i in range(3):
-                    idx = np.where(self.data[:,-(i+1)] >  self.R_DROPLET_MAX*1.001*1e-6)    
+                    idx = np.where(self.data[:,-(i+1)] >  self.r_droplet_max*1.001*1e-6)    
                 
                     self.data = np.delete(self.data, idx, 0) # Remove data
-                    idx = np.where(self.data[:,-(i+1)] < self.R_DROPLET_MIN*0.999*1e-6)    
+                    idx = np.where(self.data[:,-(i+1)] < self.r_droplet_min*0.999*1e-6)    
                     self.data = np.delete(self.data, idx, 0) # Remove data
                 
 
             R_N = R_from_vec(self.data[:,3:6].T)
             P_N = self.data[:,:3].copy()
-            self.End_effector = R_N@self.P_end + P_N
+            self.End_effector = R_N@self.p_end + P_N
         except:
             
             print('No previus data of the model')
@@ -358,20 +361,20 @@ class Manip:
                 txt = rf'φx: {a_x*180/np.pi:.2f}$^\circ$, θy: {a_y*180/np.pi:.2f}$^\circ$, ψz: {a_z*180/np.pi:.2f}$^\circ$'
                 print(txt)
             # Check extremes of Z 
-            if z>self.ZMAX:
-                z = self.ZMAX
-            elif z<self.ZMIN:
-                z = self.ZMIN
+            if z>self.z_max:
+                z = self.z_max
+            elif z<self.z_min:
+                z = self.z_min
             # Check extremes of rbase
             # Here I just run some checks, to be improved with good value
             '''
-            if rbase > 1.2*self.ZMAX*1e-6:
+            if rbase > 1.2*self.z_max*1e-6:
                 print("rbase to high")
-                rbase = 1.2*self.ZMAX*1e-6
+                rbase = 1.2*self.z_max*1e-6
                 
-            elif rbase < self.ZMIN*1e-6:
+            elif rbase < self.z_min*1e-6:
                 print("rbase to low")
-                rbase = self.ZMIN*1e-6
+                rbase = self.z_min*1e-6
             '''
             fx, fy, fz, tx, ty, tz = calc_forces(x,y,z, a_x, a_y ,a_z, rbase, outputfiles=self.OUTPUT_FLAG, j=j)
             # projection to original xy axis
@@ -397,13 +400,13 @@ class Manip:
         #u_vec = np.ones(3)
         #u_vec[0:2] = Q[0:2]
         u_vec = Q[3:]
-        u_vec = u_vec - self.U_OFFSET_SOL  # remove scale the values to improve solution
+        u_vec = u_vec - self.u_offset_sol  # remove scale the values to improve solution
         self.R = R_from_vec(u_vec)
         a_x, a_y, a_z = rot_2_angles(self.R, deg=False)
         P = Q[0:3]
-        P[0] = P[0]-self.OFF_SET_XY_SOL
-        P[1] = P[1]-self.OFF_SET_XY_SOL
-        P[2] = P[2]-self.Z_OFFSET_SOL # Remove the offset
+        P[0] = P[0]-self.offset_xy_sol
+        P[1] = P[1]-self.offset_xy_sol
+        P[2] = P[2]-self.z_offset_sol # Remove the offset
         
 
         
@@ -469,32 +472,37 @@ class Manip:
         debug = False
         h_tilde = []
         r_input = [rb1,rb2,rb3]
-        if debug: print('R_input: ', r_input)
+        if debug: print('R_input: ', np.array(r_input)*1e6)
         for i in range(3):
-            f_h = lambda x: -x**3-x*(3*r_input[i]**2 + 3*(self.R_top*1e-6)**2) + 6*self.V0/np.pi
-            #print(root_scalar(f_h, x0=(self.ZMIN*1e-6+ self.ZMAX*1e-6)/2,bracket=[self.ZMIN*1e-6, self.ZMAX*1e-6]))
+            f_h = lambda x: -x**3-x*(3*r_input[i]**2 + 3*(self.r_top*1e-6)**2) + 6*self.vol/np.pi
+            #print(root_scalar(f_h, x0=(self.z_min*1e-6+ self.z_max*1e-6)/2,bracket=[self.z_min*1e-6, self.z_max*1e-6]))
             
-            h_approx = fsolve(f_h, (self.ZMIN*1e-6+ self.ZMAX*1e-6)/2)[0]*1e6
+            h_approx = fsolve(f_h, (self.z_min*1e-6+ self.z_max*1e-6)/2)[0]*1e6
             h_tilde.append(h_approx*np.array([0,0,1]))
             
-            #Z_approx = fsolve(f_h, (self.ZMIN*1e-6+ self.ZMAX*1e-6)/2)[0]*0.8*1e6
-        if debug: print('h_tilde: ', h_tilde)
+            #Z_approx = fsolve(f_h, (self.z_min*1e-6+ self.z_max*1e-6)/2)[0]*0.8*1e6
+        if debug: print('h_tilde: ', np.array(h_tilde))
         v1 = self.b1 + h_tilde[0]
         v2 = self.b2 + h_tilde[1]
         v3 = self.b3 + h_tilde[2]
-        P_tilde = 1/3*(v1+v2+v3)
+        #P_tilde = 1/3*(v1+v2+v3)
+        if debug:
+            print('p1: ', v1)
+            print('p2: ', v2)
+            print('p3: ', v3)
+        P_tilde = 1/3*(h_tilde[0]+h_tilde[1]+h_tilde[2])
         if debug:  print('P_Disp: ', P_tilde)
-        z_tilde = np.cross(v3-v2,v1-v2)
+        z_tilde = np.cross(v1-v2,v1-v3)
         z_tilde = z_tilde/np.linalg.norm(z_tilde)
         if debug: print('z_tilde: ',z_tilde)
         v = np.cross(np.array([0,0,1]),z_tilde)
-        if debug: print('v', v)
+        if debug: print('v', v*1e6)
         s = np.linalg.norm(v)
-        if debug: print('s', s)
+        if debug: print('s', s*1e6)
         c = np.dot(np.array([0,0,1]), z_tilde)
-        if debug: print('c',c)
+        if debug: print('c',c*1e6)
         v_x = skew(v)
-        if debug: print(v_x)
+        if debug: print(v_x*1e6)
         R_tilde = np.eye(3) + v_x + v_x@v_x*(1/(1+c))
         if debug: print(R_tilde)
         t_tilde, u_tilde = theta_u_fromR(R_tilde)
@@ -504,7 +512,7 @@ class Manip:
         
         P_tilde = R_tilde@P_tilde
         if debug:  print('P_tilde: ', P_tilde)
-        Q0 = np.array([P_tilde[0], P_tilde[1],P_tilde[2], u_tilde[0]+self.U_OFFSET, u_tilde[1]+self.U_OFFSET, u_tilde[2]+self.U_OFFSET])
+        Q0 = np.array([P_tilde[0], P_tilde[1],P_tilde[2], u_tilde[0]+self.u_offset, u_tilde[1]+self.u_offset, u_tilde[2]+self.u_offset])
         
         return Q0
     
@@ -513,9 +521,9 @@ class Manip:
     def forward_kinematics(self,rb1,rb2,rb3, Q0=None):
         # Q is the position and orientation vector of a initial point[P,u]
         # Return the Position and orientation of the frame refrence mobile P and u
-        self.OFF_SET_XY_SOL = self.OFF_SET_XY
-        self.U_OFFSET_SOL = self.U_OFFSET
-        self.Z_OFFSET_SOL = self.Z_OFFSET
+        self.offset_xy_sol = self.offset_xy
+        self.u_offset_sol = self.u_offset
+        self.z_offset_sol = self.z_offset
         FLAG_SOLVE = True
         FLAG_SOL_INDATA = False
         FLAG_INTEPOLATED = False
@@ -524,9 +532,9 @@ class Manip:
         rb3 = round(rb3, -7*int(floor(log10(abs(rb3)))))
         rb_arr = np.array([rb1,rb2,rb3])
         if Q0 is not None:
-            Q0[3:] = Q0[3:]+self.U_OFFSET_SOL
-            Q0[0:2] = Q0[0:2] + self.OFF_SET_XY_SOL
-            Q0[2] = Q0[2] +  self.Z_OFFSET_SOL
+            Q0[3:] = Q0[3:]+self.u_offset_sol
+            Q0[0:2] = Q0[0:2] + self.offset_xy_sol
+            Q0[2] = Q0[2] +  self.z_offset_sol
             
         else:
             # If res is defined, find the closest value and use it as a Q0
@@ -537,9 +545,9 @@ class Manip:
                     raise
                     
                 Q0_arr = self.data[:,:6].copy()
-                Q0_arr[:,3:] = Q0_arr[:,3:]+self.U_OFFSET_SOL
-                Q0_arr[:,0:2] = Q0_arr[:,0:2] + self.OFF_SET_XY
-                Q0_arr[:,2] = Q0_arr[:,2] +  self.Z_OFFSET
+                Q0_arr[:,3:] = Q0_arr[:,3:]+self.u_offset_sol
+                Q0_arr[:,0:2] = Q0_arr[:,0:2] + self.offset_xy
+                Q0_arr[:,2] = Q0_arr[:,2] +  self.z_offset
                 
                 #Q0_in = self.data[:,6:]
                 Q0_in = self.data[:,6:9]
@@ -573,22 +581,9 @@ class Manip:
                     tolerance = 1e-6  # Example tolerance value
                     #print('norm',norms[closest_indices[0]])
                     if norms[closest_indices[0]]>tolerance:
-                        #print(rb_arr)
-                        #print(array2_reshaped[closest_indices[0]])
-                        #print(norms[closest_indices[0]])
-                        #print('FAR')
                         raise
                     index = closest_indices[0]
-                    #index = y_tuples.index(x_tuples)
-#                    x_tuples = tuple(point)
-#                    print('x_tuples', x_tuples)
-#                    y_tuples = [tuple(row) for row in points]
-                    #print('y_tuples', y_tuples)
-#                    index = y_tuples.index(x_tuples)
-                    #print('ZXC')
                     Q0 = Q0_arr[index].copy()
-                    #if index != 419:
-                    #return self.data[index].copy() # Remove ths line to calculate it each time
                     FT = self.eqsystem_forward(Q0, *rb_arr)
                     if self.verbose:
                         print(f'Norm FT: {np.linalg.norm(FT)} ')
@@ -598,9 +593,7 @@ class Manip:
                         FLAG_SOLVE = False
                     
                     if np.linalg.norm(FT) > self.tol_solved:
-                        # Recalc
                         print('High norm')
-                        #print(index)
                         self.data = np.delete(self.data, index, 0) # Remove bad data
                         raise # Exception to interpolet guess
                         
@@ -608,42 +601,27 @@ class Manip:
                         print('Sol. in data')
                         FLAG_SOL_INDATA = True
                         # Check if the forces are small
-                        
-                            
-                    #return self.data[index].copy()
                 except:
-                # Linear interpolation
-                    #FT = self.eqsystem_forward(Q0.copy(), *rb_arr)
-                    
+                    # Linear interpolation
                     values =  self.data[:,:6].copy()
                     points = self.data[:,6:9].copy()
                     Q0 = self.init_guess(rb1,rb2,rb3)
-                    #print('Q0 guess: ',Q0)
                     interp = LinearNDInterpolator(points, values, rescale=True)
-                    #interp = RBFInterpolator(points, values, kernel='linear')
-                    #print(interp(point))
                     Q0 = interp(point)[0].copy()
-                    Q0[3:] = Q0[3:] + self.U_OFFSET
+                    Q0[3:] = Q0[3:] + self.u_offset
                     print('Guess interpolated')
-                   # print('Q0 interp: ',Q0)
-                    #print(Q0)
                     if any(np.isnan(Q0)):
                         print('NAN: Q0 aproximated: Using nearest and spherical')
                         interp = NearestNDInterpolator(points, values)
-                        #print(interp(point))
                         Q0 = interp(point)[0].copy()
-                        Q0[3:] = Q0[3:] + self.U_OFFSET        
+                        Q0[3:] = Q0[3:] + self.u_offset        
                         Q0_sp = self.init_guess(rb1,rb2,rb3)   
                         Q0 = (Q0 + Q0_sp)/2
                         if self.verbose: print('Q0 guess: ',Q0)
                         if any(np.isnan(Q0)):
                             if self.verbose: print('NAN: Q0 aproximated: Using spherical cap ')
-                        #print('Nearest')
-                        # if is outside the convex hull, takes the mean between closest value
-                        # And the using spherical cap approximation
-                        #Q0 = Q0_arr[closest_indices[0]]
                             Q0 = self.init_guess(rb1,rb2,rb3)
-                            #print('Q0 guess: ',Q0)
+
                     # check if the approximation is good enough
                     FT = self.eqsystem_forward(Q0, *rb_arr)                            
                     if np.linalg.norm(FT) <= self.tol_solved:
@@ -651,19 +629,17 @@ class Manip:
                         FLAG_SOLVE = False
                         FLAG_INTEPOLATED = True
                         sol = Q0.copy()
-                        sol[3:] = sol[3:] - self.U_OFFSET_SOL
-                        sol[0:2] = sol[0:2] - self.OFF_SET_XY
+                        sol[3:] = sol[3:] - self.u_offset_sol
+                        sol[0:2] = sol[0:2] - self.offset_xy
                         output = np.concatenate((sol,np.array([rb1,rb2,rb3])))
                         #print(f'output: {output}')
                     else:
                         print(f'Interpolation not good enough: {np.linalg.norm(FT)}')
                  #   print(Q0)
             except:
-                print('Q0 aproximated: Using nearest and s; 1')
+                print('Q0 aproximated: Using nearest and initial guess')
                 Q0_sp = self.init_guess(rb1,rb2,rb3)   
-                #print(Q0_sp)
-                #print('checkpoint 0') 
-                #print(self.data)
+                '''
                 if self.data is not None:
                     
                     values =  self.data[:,:6].copy()
@@ -671,23 +647,18 @@ class Manip:
                     interp = NearestNDInterpolator(points, values)
                     #print(interp(point))
                     Q0 = interp(point)[0].copy()
-                    Q0[3:] = Q0[3:] + self.U_OFFSET        
+                    Q0[3:] = Q0[3:] + self.u_offset        
                     Q0 = (Q0 + Q0_sp)/2
                 else:
-                    Q0 = Q0_sp.copy()
-                
-                #print('checkpoint 0')    
+                '''
+                Q0 = Q0_sp.copy()
                 
                 if any(np.isnan(Q0)):
                     print('NAN: Q0 aproximated: Using spherical cap ')
-                    #print('Q0 aproximated: Using spherical cap')
-                    #print(np.mean([rb1,rb2,rb3]))
                     Q0 = self.init_guess(rb1,rb2,rb3) # With offset
                     Q0_clean = Q0.copy()
-                    Q0_clean[3:] = Q0_clean[3:]-np.ones_like(Q0_clean[3:])*self.U_OFFSET
-                    #print('Q0 guess: ',Q0_clean)
+                    Q0_clean[3:] = Q0_clean[3:]-np.ones_like(Q0_clean[3:])*self.u_offset
                     
-                print('checkpoint 1')    
                 FT = self.eqsystem_forward(Q0, *rb_arr)   
                 
                 if np.linalg.norm(FT) <= self.tol_solved:
@@ -695,10 +666,9 @@ class Manip:
                     FLAG_SOLVE = False
                     FLAG_INTEPOLATED = True
                     sol = Q0.copy()
-                    sol[3:] = sol[3:] - self.U_OFFSET_SOL
-                    sol[0:2] = sol[0:2] - self.OFF_SET_XY
+                    sol[3:] = sol[3:] - self.u_offset_sol
+                    sol[0:2] = sol[0:2] - self.offset_xy
                     output = np.concatenate((sol,np.array([rb1,rb2,rb3])))
-                    #print(f'output: {output}')
                     
                 else:
                     print(f'Interpolation not good enough: {np.linalg.norm(FT)}')
@@ -723,15 +693,15 @@ class Manip:
                 print(info)
                 print(f'Norm: {np.linalg.norm(info[1]["fvec"]):0.2e}')
         # Remove offset of the solution
-            sol[3:] = sol[3:] - self.U_OFFSET_SOL
-            sol[0:2] = sol[0:2] - self.OFF_SET_XY
+            sol[3:] = sol[3:] - self.u_offset_sol
+            sol[0:2] = sol[0:2] - self.offset_xy
             if self.verbose:
                 print(f'Solved in {time.time()-t0:0.1f} (s)')
             
         
-        self.OFF_SET_XY_SOL = 0
-        self.U_OFFSET_SOL = 0
-        self.Z_OFFSET_SOL = 0
+        self.offset_xy_sol = 0
+        self.u_offset_sol = 0
+        self.z_offset_sol = 0
         
         
         # When is solved, add the data to the current data
@@ -758,16 +728,15 @@ class Manip:
                 
                 
         else:
-            print('HERE')
             self.data = np.reshape(output,(1,9))
         
         # Add the solution to the end effector list
-        #self.End_effector = R_N@self.P_end + P_N   
+        #self.End_effector = R_N@self.p_end + P_N   
         if not FLAG_SOL_INDATA or FLAG_INTEPOLATED:
             u_r = output[3:].copy()
             R = R_from_vec(u_r)
             P = output[0:3].copy()
-            End_effector = R@self.P_end + P
+            End_effector = R@self.p_end + P
             #End_effector = End_effector[:,np.newaxis]
             #print(End_effector.shape)
             if hasattr(self, 'End_effector'):
@@ -797,11 +766,11 @@ class Manip:
         #u_vec = np.ones(3)
         #u_vec[0:2] = Q[0:2]
         u_vec = Q[3:]
-        u_vec = u_vec - self.U_OFFSET_SOL  # scale the values to improve solution
+        u_vec = u_vec - self.u_offset_sol  # scale the values to improve solution
         self.R = R_from_vec(u_vec)
         a_x, a_y, a_z = rot_2_angles(self.R, deg=False)
-        # transform P_end to the translation of the frame reference P
-        P = r_end - self.R@self.P_end
+        # transform p_end to the translation of the frame reference P
+        P = r_end - self.R@self.p_end
 
     
         # Kinematics equation [um]
@@ -860,7 +829,7 @@ class Manip:
 
     def Jacob_inverse(self,Q, *args):
         # Computes the jacobian for the inverse kinematics
-        flag_debug = True
+        flag_debug = False
         if flag_debug: print("Jacob:")
         if flag_debug: print(Q)
         d = 2e-5 # radii in m
@@ -957,17 +926,17 @@ class Manip:
         # Q is {rb{3},u(3)}
         # args is P
         # Return the P
-        self.U_OFFSET_SOL = self.U_OFFSET
+        self.u_offset_sol = self.u_offset
         
         if X0 is not None:
-            X0[3:] = X0[3:]+self.U_OFFSET_SOL
+            X0[3:] = X0[3:]+self.u_offset_sol
         
         else:
             # If res is defined, find the closest value and use it as a Q0
             # if not stimate one initial value (can fail)
             #try:   
             Q0_arr = self.data[:,np.array([6,7,8,3,4,5])].copy()
-            Q0_arr[:,3:] = Q0_arr[:,3:]+self.U_OFFSET_SOL
+            Q0_arr[:,3:] = Q0_arr[:,3:]+self.u_offset_sol
             
             Q0_in = self.End_effector[:,:3]
             # Reshape arrays to enable broadcasting
@@ -989,7 +958,7 @@ class Manip:
                 return self.data[[closest_indices[0]]].copy()
             #except:
                 #print('Q0 aproximated')
-                #Q0 = np.array([self.OFF_SET_XY, self.OFF_SET_XY,(self.ZMAX+self.ZMIN)/2, 1,1,1])
+                #Q0 = np.array([self.offset_xy, self.offset_xy,(self.z_max+self.z_min)/2, 1,1,1])
         #return
     
         if self.verbose or verbose:
@@ -1011,9 +980,9 @@ class Manip:
             print(f'Solved in {time.time()-t0:0.1f} (s)')
         
         
-        self.U_OFFSET_SOL = 0
+        self.u_offset_sol = 0
         u = sol[3:]
-        P = r_end-R_from_vec(u)@self.P_end
+        P = r_end-R_from_vec(u)@self.p_end
         
         return np.concatenate((P,sol[3:],sol[:3]))
 
@@ -1052,10 +1021,10 @@ class Manip:
         if self.verbose:
             print(f'P = {P}')
             print(f'H1 = {H1}')
-        #P_end = np.array([0,0,535]) # 100 um in z 
+        #p_end = np.array([0,0,535]) # 100 um in z 
         if self.verbose:
-            print(f'Pend = {P_end}')
-        End_effector = R@self.P_end + P
+            print(f'Pend = {p_end}')
+        End_effector = R@self.p_end + P
         self.P_limits.append(End_effector)
         if self.verbose:
             print(f'End Eff = {End_effector}')
@@ -1250,7 +1219,7 @@ class Manip:
         self.zoom = zoom
         R_N = R_from_vec(data_2plot[:,3:6].T)
         P_N = data_2plot[:,:3].copy()
-        data_end = R_N@self.P_end + P_N
+        data_end = R_N@self.p_end + P_N
         #if self.zoom:
         mean, d = zip(*[get_mean_change(data_end, i) for i in range(3)])
         lm = np.max(d)
@@ -1276,7 +1245,8 @@ class Manip:
     
     def save_data(self):
         
-        np.savetxt(f'../data/Solutions_WS_{self.V0*1e9}uL.txt', self.data, fmt='%.6e')
+        #        np.savetxt(f'../data/Solutions_WS_{self.vol*1e9}uL.txt', self.data, fmt='%.6e')
+        np.savetxt(f'../data/{self.fname}.txt', self.data, fmt='%.6e')
     
     def my_function_star(self, args):
         return eq_system_multithread(*args)    
@@ -1326,10 +1296,6 @@ class Manip:
     
     def plot_test(self):
         
-       # mesh = pyvista.read(r'../data/Printed_00.stl')
-       # mesh.plot()
-        
-        
         j = 1
         i = 1
         
@@ -1345,7 +1311,6 @@ class Manip:
         
         verts[:,1] = verts[:,1]#+v1[0]
         verts[:,2] = verts[:,2]#+v1[1]
-        #verts_dict = dict(zip(verts[:, 0], verts[:, 1:]))
         
         data = np.loadtxt(f'../data/mesh/facet_{j}_{i}.txt')
         
@@ -1358,15 +1323,10 @@ class Manip:
         
         mesh = pv.PolyData(verts, faces)
         mesh.plot(show_edges=True, line_width=5)
-        
 
-#        tripod_mesh = mesh.Mesh.from_file(r'../data/Printed_00.stl')
-#        tripod_mesh.vectors = tripod_mesh.vectors
-        
-        
         return
     
-    def pv_plot(self, data_plot, pl=None,update_cams=False, bg_plot = False):
+    def pv_plot(self, data_plot, pl=None,update_cams=False, bg_plot = False, save_stl=False):
         if data_plot.ndim == 1:
             data_plot = data_plot.reshape(1, -1)
         save_meshes(self, data_plot)
@@ -1383,12 +1343,12 @@ class Manip:
         resf = data_plot[0]
         
         w = [self.w1, self.w2, self.w3]
-        file_path = '../data/Printed_00.stl'
+
         P = resf[0:3].copy()
         u_r = resf[3:].copy()
     
         pl.subplot(0)
-        plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        plot_robot(pl,0,w,P,u_r,file_path=self.stl_path, save_stl=save_stl)
         pl.camera.azimuth = 90
         if update_cams:
             pl.camera.zoom(1.5)
@@ -1399,21 +1359,18 @@ class Manip:
 
         #pl.camera_position = 'yz'
         pl.subplot(1)
-        plot_robot(pl,0,w,P,u_r,file_path=file_path)
-        #pl.add_points(End_effector)
+        plot_robot(pl,0,w,P,u_r,file_path=self.stl_path)
         pl.camera_position = 'xy'
         
         pl.camera.zoom(4)
-        #line = pv.Line((0, 0, 0), (0, 0, 20))
         
         pl.add_legend_scale(number_minor_ticks=2,left_axis_visibility=False,
                             bottom_axis_visibility=False,
                             right_border_offset=60,top_border_offset=60,
                             legend_visibility=False,font_size_factor=1,
                             )
-        #pl.show_grid()
         pl.subplot(2)
-        plot_robot(pl,0,w,P,u_r,file_path=file_path)
+        plot_robot(pl,0,w,P,u_r,file_path=self.stl_path)
         pl.camera_position = 'yz'
         pl.camera.azimuth = 180
         
@@ -1433,19 +1390,18 @@ class Manip:
         #pl.show_grid()
         
 if __name__ == "__main__":
-    P_end = np.array([-380,0,630]) # ANTENNA as end effector
+    p_end = np.array([-380,0,630]) # ANTENNA as end effector
     DROPLET_VOLUME = 0.102e-9#0.22e-9
     theta_0 = 135*np.pi/180
     theta_min = 60*np.pi/180
     r_min = (3*DROPLET_VOLUME*np.sin(theta_0)**2/(np.pi*(2+np.cos(theta_0))*(1-np.cos(theta_0))**2))**(1/3)*1e6
     r_max = (3*DROPLET_VOLUME*np.sin(theta_min)**2/(np.pi*(2+np.cos(theta_min))*(1-np.cos(theta_min))**2))**(1/3)*1e6
-    #r_min = (DROPLET_VOLUME*3/(2*np.pi))**(1/3)*1e6
     r_min = np.round(r_min*1.0,0)
     r_max = np.round(r_max*1.052,0)
     print(r_min)
     print(r_max)
-    robot = Manip(P_end=P_end, V0=DROPLET_VOLUME,R_DROPLET_MIN=r_min, R_DROPLET_MAX=r_max,                    
-                        ZMAX=600, ZMIN=200, R_top=150)
+    robot = Manip(p_end=p_end, vol=DROPLET_VOLUME,r_droplet_min=r_min, r_droplet_max=r_max,                    
+                        z_max=600, z_min=200, r_top=150)
     # Load Data
     robot.load_data()
     r1 = 240*1e-6
