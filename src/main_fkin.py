@@ -98,7 +98,7 @@ if __name__ == "__main__":
             D1 = robot.forward_kinematics(R1*1e-6, R2*1e-6, R3*1e-6)
             data_plot = D1
             pl.clear_actors()
-            robot.pv_plot(data_plot, pl, save_stl=True)
+            robot.pv_plot(data_plot, pl, save_stl=False)
         else:
             print("Unknown command. Try again.")
 
