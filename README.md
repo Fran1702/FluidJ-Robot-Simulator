@@ -29,7 +29,7 @@ The repository is organized as follows:
 
 ## 🚀 Getting Started
 
-To use the FluidJ Robot Simulator, follow these steps:
+To use the FluidJ Robot Simulator, follow these steps (python3.8.8):
 
 ### 1. Install **Surface Evolver**
 Ensure that [Surface Evolver](http://kenbrakke.com/evolver/html/install.htm) is installed on your system. Follow the official installation instructions provided on their website.
