@@ -5,7 +5,7 @@ networkx==2.8.8
 numpy==1.23.0
 numpy_stl==3.1.2
 pandas==2.0.3
-pyvista==0.44.1
+pyvista==0.45.2
 pyvistaqt==0.11.1
 SciencePlots==2.1.1
 scipy==1.10.1
