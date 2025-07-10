@@ -279,9 +279,37 @@ def calc_forces(x, y, z, ang_x, ang_y, ang_z, rb, outputfiles=False, j=None):
         #inputdata="save \n"
         stdoutdata,stderrdata=process.communicate(input=inputdata)
         #print(stdoutdata)
-        l = stdoutdata.split('\n')
-        #Rename the file 
-        forces_l = [float(l[i-7].split(' ')[-1]) for i in range(6)]
+        lines = stdoutdata.split('\n')
+
+        values = {
+            'xforce': None,
+            'yforce': None,
+            'zforce': None,
+            'xtorque': None,
+            'ytorque': None,
+            'ztorque': None
+        }
+
+        # Extract values by key
+        for line in lines:
+            for key in values:
+                if line.startswith(f"{key}:"):
+                    values[key] = float(line.split(':')[1].strip())
+
+        # Make sure all values were found (optional but good practice)
+        missing = [k for k, v in values.items() if v is None]
+        if missing:
+            raise ValueError(f"Missing values for: {', '.join(missing)}")
+
+        # Now build the list in the desired order
+        forces_l = [
+            values['xforce'],
+            values['yforce'],
+            values['zforce'],
+            values['xtorque'],
+            values['ytorque'],
+            values['ztorque'],
+        ]
         #print(forces_l)
         return forces_l
         
